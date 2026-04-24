@@ -1,7 +1,9 @@
 import math
 import requests
 import io
-from PIL import Image
+import json
+import os
+from PIL import Image, ImageOps
 from fastapi import FastAPI, File, UploadFile, Form
 from typing import Optional
 from ultralytics import YOLO
@@ -34,35 +36,49 @@ def get_flights_around(lat, lon, radius_km=50):
 
 # --- 2. L'IA YOLO PERSONNALISÉE (Plan B) ---
 
-print("Chargement du modèle YOLO personnalisé...")
-# YOLO charge automatiquement tes 102 classes stockées dans best.pt
-ai_model = YOLO("best.pt") 
+print("Chargement du modèle YOLO V2...")
+ai_model = YOLO("best_v2_complet.pt") 
 print("Modèle YOLO prêt !")
+
+# Il faut faire correspondre l'ID (le numéro) avec le bon nom d'avion.
+# Chargement des mapping depuis le fichier class_mappings.json généré
+CLASS_NAMES_MAPPING = {}
+mapping_path = "class_mappings.json"
+
+if os.path.exists(mapping_path):
+    with open(mapping_path, "r", encoding="utf-8") as f:
+        mappings_data = json.load(f)
+        
+    # Les IDs 0 à 99 sont ceux du dataset FGVC (dans l'ordre du fichier variants.txt)
+    for k, v in mappings_data.get("fgvc_aircraft_100", {}).items():
+        CLASS_NAMES_MAPPING[int(k)] = v
+        
+    for k, v in mappings_data.get("yolo_flying_aircraft_17", {}).items():
+        CLASS_NAMES_MAPPING[int(k) + 102] = v
+else:
+    print("Fichier class_mappings.json introuvable !")
 
 def real_ai_predict(image_bytes):
     """Analyse l'image avec ton propre modèle YOLOv8."""
-    image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+    raw_image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+    image = ImageOps.exif_transpose(raw_image)
     
-    # YOLO fait sa prédiction (conf=0.25 ignore les prédictions en dessous de 25% de certitude)
-    results = ai_model.predict(image, conf=0.25, verbose=False)
-    
-    # Ultralytics renvoie une liste de résultats (un par image envoyée)
+    results = ai_model.predict(image, conf=0.10, verbose=True)
     result = results[0] 
     
-    # Si YOLO ne détecte aucune boîte (aucun avion)
     if len(result.boxes) == 0:
         return {
             "type": "Aucun aéronef détecté",
             "confidence": 0.0
         }
     
-    # YOLO trie automatiquement les résultats par niveau de confiance
     best_box = result.boxes[0] 
     
-    # Extraction des données du tenseur
     class_id = int(best_box.cls[0].item())
     confidence = float(best_box.conf[0].item())
-    class_name = result.names[class_id] # Récupère le vrai nom de la classe FGVC
+    
+    # Si l'ID n'est pas dans le dictionnaire, on affiche "Avion ID: X" par sécurité
+    class_name = CLASS_NAMES_MAPPING.get(class_id, f"Modèle inconnu (ID: {class_id})")
     
     return {
         "type": class_name,

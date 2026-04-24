@@ -4,12 +4,14 @@ import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Location from 'expo-location';
 import { Magnetometer } from 'expo-sensors';
 import MapView, { Marker } from 'react-native-maps';
+import * as ImagePicker from 'expo-image-picker';
 
 // Activation des animations de layout sur Android
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
 
+// ⚠️ TON ADRESSE IP
 const BACKEND_URL = "http://192.168.1.31:8000"; 
 
 export default function App() {
@@ -50,7 +52,7 @@ export default function App() {
       fetchRadar(initialLoc.coords.latitude, initialLoc.coords.longitude);
       interval = setInterval(() => {
         fetchRadar(initialLoc.coords.latitude, initialLoc.coords.longitude);
-      }, 10000); // Polling toutes les 10 secondes
+      }, 10000);
 
       Magnetometer.setUpdateInterval(500);
       Magnetometer.addListener(data => {
@@ -66,7 +68,7 @@ export default function App() {
     };
   }, []);
 
-  // --- ACTIONS ---
+  // --- INTERACTION CARTE ---
   const handleMapInteraction = () => {
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
     setIsMapEnlarged(true);
@@ -79,23 +81,21 @@ export default function App() {
     }, 6000);
   };
 
-  const takePictureAndAnalyze = async () => {
-    if (!cameraRef.current) return;
+  // --- FONCTION CENTRALE D'ENVOI ---
+  const processAnalysis = async (imageUri, loc = null, currentHeading = null) => {
     try {
       setIsAnalyzing(true);
       setResult(null);
-
-      const photo = await cameraRef.current.takePictureAsync({ quality: 0.5 });
-      setCapturedImage(photo.uri);
-      
-      const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-      setLocation(loc);
+      setCapturedImage(imageUri);
 
       const formData = new FormData();
-      formData.append('image', { uri: photo.uri, name: 'capture.jpg', type: 'image/jpeg' });
-      formData.append('latitude', loc.coords.latitude.toString());
-      formData.append('longitude', loc.coords.longitude.toString());
-      formData.append('heading', heading.toString());
+      formData.append('image', { uri: imageUri, name: 'upload.jpg', type: 'image/jpeg' });
+      
+      if (loc && currentHeading !== null) {
+        formData.append('latitude', loc.coords.latitude.toString());
+        formData.append('longitude', loc.coords.longitude.toString());
+        formData.append('heading', currentHeading.toString());
+      }
 
       const response = await fetch(`${BACKEND_URL}/analyze`, {
         method: 'POST',
@@ -110,6 +110,27 @@ export default function App() {
       Alert.alert('Erreur', 'Impossible de joindre le serveur.');
     } finally {
       setIsAnalyzing(false);
+    }
+  };
+
+  // --- ACTIONS CAPTURE / GALERIE ---
+  const takePictureAndAnalyze = async () => {
+    if (!cameraRef.current) return;
+    const photo = await cameraRef.current.takePictureAsync({ quality: 0.5 });
+    const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+    
+    await processAnalysis(photo.uri, loc, heading);
+  };
+
+  const pickImageFromGallery = async () => {
+    let result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      quality: 0.8,
+    });
+
+    if (!result.canceled) {
+      await processAnalysis(result.assets[0].uri, null, null);
     }
   };
 
@@ -137,14 +158,25 @@ export default function App() {
         <Text style={styles.hudText}>🧭 {heading}°</Text>
       </View>
 
-      {/* Bouton Capture */}
+      {/* Barre des actions (Capture + Galerie) */}
       <View style={styles.bottomCenterBar}>
         {isAnalyzing ? (
           <ActivityIndicator size="large" color="#00ff00" />
         ) : (
-          <TouchableOpacity style={styles.captureButton} onPress={takePictureAndAnalyze}>
-            <View style={styles.captureInner} />
-          </TouchableOpacity>
+          <View style={styles.buttonRow}>
+            {/* 1. Espace invisible à GAUCHE pour ne pas gêner la mini-map */}
+            <View style={{width: 50, marginRight: 20}} /> 
+
+            {/* 2. Bouton Capture principal (CENTRE) */}
+            <TouchableOpacity style={styles.captureButton} onPress={takePictureAndAnalyze}>
+              <View style={styles.captureInner} />
+            </TouchableOpacity>
+            
+            {/* 3. Bouton Galerie (Déplacé à DROITE) */}
+            <TouchableOpacity style={styles.galleryButton} onPress={pickImageFromGallery}>
+              <Text style={{fontSize: 24}}>🖼️</Text>
+            </TouchableOpacity>
+          </View>
         )}
       </View>
 
@@ -188,7 +220,7 @@ export default function App() {
               {capturedImage && <Image source={{ uri: capturedImage }} style={styles.thumbnail} />}
               <View style={{flex: 1, marginLeft: 15}}>
                 <Text style={styles.resultTitle}>
-                  {result.source === 'radar' ? '📡 Radar (Plan A)' : '🤖 IA (Plan B)'}
+                  {result.source === 'radar' ? '📡 Radar (Plan A)' : '🤖 IA YOLO (Plan B)'}
                 </Text>
                 
                 {result.source === 'radar' ? (
@@ -223,8 +255,11 @@ const styles = StyleSheet.create({
   lineV: { position: 'absolute', width: 2, height: 40, backgroundColor: 'rgba(0,255,0,0.6)' },
 
   bottomCenterBar: { position: 'absolute', bottom: 30, left: 0, right: 0, alignItems: 'center', zIndex: 10 },
+  buttonRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', width: '100%' },
+  
   captureButton: { width: 70, height: 70, borderRadius: 35, backgroundColor: 'rgba(255, 255, 255, 0.3)', justifyContent: 'center', alignItems: 'center' },
   captureInner: { width: 54, height: 54, borderRadius: 27, backgroundColor: 'white' },
+  galleryButton: { width: 50, height: 50, backgroundColor: 'rgba(255,255,255,0.8)', borderRadius: 25, justifyContent: 'center', alignItems: 'center', marginLeft: 20 },
 
   miniMapWrapper: { position: 'absolute', bottom: 30, left: 20, borderRadius: 12, borderWidth: 2, borderColor: 'rgba(255,255,255,0.5)', overflow: 'hidden', backgroundColor: '#333', elevation: 5, zIndex: 15 },
   miniMapNormal: { width: 150, height: 150 },

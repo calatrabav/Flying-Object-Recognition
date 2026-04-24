@@ -51,11 +51,11 @@ def get_flights_around(lat, lon, radius_km=50):
 # --- 3. ORCHESTRATEUR (main.py) ---
 
 if __name__ == "__main__":
-    # Tes coordonnées fictives (Exemple: Place du Capitole, Toulouse)
+    # coordonnées fictives (Exemple: Place du Capitole, Toulouse)
     MY_LAT = 43.6047
     MY_LON = 1.4442
     
-    # L'orientation de ton téléphone (Boussole)
+    # L'orientation du téléphone (Boussole)
     # 0 = Nord, 90 = Est, 180 = Sud, 270 = Ouest
     MY_HEADING = 180  # Imaginons que tu regardes vers l'Est
     MY_FOV = 60      # Un téléphone standard voit sur environ 60 degrés de large
